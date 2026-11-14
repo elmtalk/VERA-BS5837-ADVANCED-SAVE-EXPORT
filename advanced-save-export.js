@@ -152,13 +152,72 @@
   document.body.append(panel);
   const buttons=panel.querySelector('#vera-export-buttons'),status=panel.querySelector('#vera-export-status');
   function button(label,action){const b=document.createElement('button');b.textContent=label;b.type='button';b.style.cssText='background:#e1f1e9;color:#10251f;border:0;border-radius:5px;padding:7px;cursor:pointer;font-weight:600';b.addEventListener('click',()=>run(action));buttons.append(b);}
-  button('Backup JSON',async()=>{const data=await capture();download('VERA-backup-'+stamp()+'.json',JSON.stringify(data,null,2),'application/json');});
-  button('Export ZIP + CSV',async()=>{
-    const data=await capture(),files=[['vera-backup.json',JSON.stringify(data,null,2)]], manifest={created_at:data.created_at,format:data.format,databases:data.databases.map(d=>({name:d.name,stores:d.stores.map(s=>({name:s.name,records:s.records.length}))})),localStorage_keys:Object.keys(data.localStorage)};
+  // Prepare a complete local ZIP first, then share from a separate user tap.
+  // Web Share API requires user activation and cannot reliably be called after long IndexedDB reads.
+  let preparedShare = null;
+  const recipientRow = document.createElement('label');
+  recipientRow.style.cssText = 'display:block;margin:8px 0 6px';
+  recipientRow.textContent = 'Email recipient: ';
+  const recipientInput = document.createElement('input');
+  recipientInput.type = 'email';
+  recipientInput.placeholder = 'recipient@example.com';
+  recipientInput.value = localStorage.getItem('vera_export_email_recipient') || 'jamesroberts@logikaconsultants.co.uk';
+  recipientInput.style.cssText = 'box-sizing:border-box;width:100%;margin-top:3px;padding:7px;border-radius:5px;border:1px solid #9fb7ad;color:#111;background:#fff';
+  recipientInput.addEventListener('change',()=>localStorage.setItem('vera_export_email_recipient',recipientInput.value.trim()));
+  recipientRow.append(recipientInput);
+  buttons.before(recipientRow);
+  function makeBundle(data) {
+    const files=[['vera-backup.json',JSON.stringify(data,null,2)]];
+    const manifest={created_at:data.created_at,format:data.format,databases:data.databases.map(d=>({name:d.name,stores:d.stores.map(s=>({name:s.name,records:s.records.length}))})),localStorage_keys:Object.keys(data.localStorage)};
     files.push(['manifest.json',JSON.stringify(manifest,null,2)]);
-    for(const db of data.databases)for(const store of db.stores){const safe=(db.name+'-'+store.name).replace(/[^a-z0-9_-]/gi,'_');files.push(['csv/'+safe+'.csv',rowsCSV(store.records.map(r=>({__record_key:r.key,...(r.value&&typeof r.value==='object'&&!Array.isArray(r.value)?r.value:{value:r.value})}))) ]);}
-    download('VERA-project-bundle-'+stamp()+'.zip',zip(files),'application/zip');
+    for(const db of data.databases) for(const store of db.stores) {
+      const safe=(db.name+'-'+store.name).replace(/[^a-z0-9_-]/gi,'_');
+      files.push(['csv/'+safe+'.csv',rowsCSV(store.records.map(r=>({__record_key:r.key,...(r.value&&typeof r.value==='object'&&!Array.isArray(r.value)?r.value:{value:r.value})})))]);
+    }
+    return { filename:'VERA-project-bundle-'+stamp()+'.zip', blob:zip(files), manifest };
+  }
+  const prepareButton=document.createElement('button');
+  prepareButton.type='button'; prepareButton.textContent='Save & prepare email ZIP';
+  prepareButton.style.cssText='background:#cce7ce;color:#10251f;border:0;border-radius:5px;padding:7px;cursor:pointer;font-weight:700';
+  buttons.append(prepareButton);
+  const sendButton=document.createElement('button');
+  sendButton.type='button';sendButton.textContent='Share / email ZIP';sendButton.disabled=true;
+  sendButton.style.cssText='background:#e1f1e9;color:#10251f;border:0;border-radius:5px;padding:7px;cursor:pointer;font-weight:600';
+  buttons.append(sendButton);
+  prepareButton.addEventListener('click',()=>run(async()=>{
+    // Upstream VERA autosaves editable drafts; allow its debounced handler to settle.
+    // This is NOT a substitute for completing/saving an assessment in the original app.
+    const active=document.activeElement;
+    if(active && typeof active.blur==='function') active.blur();
+    await new Promise(resolve=>setTimeout(resolve,1500));
+    const data=await capture();
+    preparedShare=makeBundle(data);
+    sendButton.disabled=false;
+    status.textContent='ZIP prepared ('+preparedShare.manifest.databases.reduce((n,d)=>n+d.stores.reduce((m,s)=>m+s.records,0),0)+' records). Tap Share / email ZIP. Original VERA save should be completed first.';
+  }));
+  sendButton.addEventListener('click',()=>{
+    if(!preparedShare) return;
+    const prepared=preparedShare;
+    const file=new File([prepared.blob],prepared.filename,{type:'application/zip'});
+    const to=recipientInput.value.trim();
+    const subject='VERA survey export — '+new Date().toLocaleDateString('en-GB');
+    const message='Please find attached the VERA survey ZIP export ('+prepared.filename+').';
+    const fallback=()=>{
+      download(prepared.filename,prepared.blob,'application/zip');
+      if(confirm('ZIP downloaded. Open an email draft to '+(to||'your chosen recipient')+'? You must manually attach the downloaded ZIP.')) {
+        location.href='mailto:'+(to?encodeURIComponent(to):'')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(message+'\\n\\nAttach the ZIP from Downloads before sending.');
+      }
+      status.textContent='ZIP downloaded. Attach it manually to the email before sending.';
+    };
+    if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})) {
+      // The share sheet includes email apps; choose email and confirm the attachment/recipient there.
+      navigator.share({files:[file],title:subject,text:message+' Recipient: '+to}).then(()=>{
+        status.textContent='Share sheet closed. Check the message in your chosen email app was actually sent.';
+      }).catch(e=>{if(e.name!=='AbortError'){console.warn(e);fallback();}});
+    } else fallback();
   });
+  button('Backup JSON',async()=>{const data=await capture();download('VERA-backup-'+stamp()+'.json',JSON.stringify(data,null,2),'application/json');});
+  button('Export ZIP + CSV',async()=>{const bundle=makeBundle(await capture());download(bundle.filename,bundle.blob,'application/zip');});
   const file=document.createElement('input');file.type='file';file.accept='.json,.zip,application/json,application/zip';file.style.display='none';panel.append(file);
   button('Restore JSON / ZIP',async()=>file.click());
   file.addEventListener('change',()=>run(async()=>{const f=file.files[0];if(!f)return;const obj=f.name.toLowerCase().endsWith('.zip')?unzipBackup(await f.arrayBuffer()):JSON.parse(await f.text());await restore(obj);file.value='';}));
