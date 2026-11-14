@@ -145,7 +145,7 @@
     alert('Restore finished. The app will reload to reread the saved data.');
     location.reload();
   }
-  async function run(fn) { try { status.textContent='Working…';await fn();status.textContent='Finished'; } catch(e){console.error('VERA advanced save/export:',e);status.textContent='Error: '+e.message;alert('Save/export error: '+e.message);} }
+  async function run(fn) { try { status.textContent='Working…';await fn();if(status.textContent==='Working…')status.textContent='Finished'; } catch(e){console.error('VERA advanced save/export:',e);status.textContent='Error: '+e.message;alert('Save/export error: '+e.message);} }
   const panel=document.createElement('details');panel.id='vera-advanced-tools';
   panel.style.cssText='position:fixed;bottom:12px;right:12px;z-index:2147483000;max-width:min(340px,calc(100vw - 24px));background:#132132;color:#fff;border:1px solid #6e9a90;border-radius:10px;padding:10px;font:13px/1.5 system-ui;box-shadow:0 4px 24px #0008';
   panel.innerHTML='<summary style="cursor:pointer;font-weight:700">Advanced save & export</summary><p style="margin:8px 0">Browser-storage backup, including stored photos where present. This exports all VERA records on this browser origin, not just the current project.</p><div id="vera-export-buttons" style="display:flex;flex-wrap:wrap;gap:6px"></div><small id="vera-export-status" role="status"></small>';
