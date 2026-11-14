@@ -1,0 +1,42 @@
+name: Sync integrated VERA and advanced save/export
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build.yml'
+      - 'advanced-save-export.js'
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Retrieve original integrated VERA build
+        run: |
+          git clone --depth 1 https://github.com/elmtalk/VERA-BS5837-Survey-Integrated-.git /tmp/vera-upstream
+          test -s /tmp/vera-upstream/index.html
+          rsync -a --exclude='.git' --exclude='.github' --exclude='README.md' --exclude='advanced-save-export.js' /tmp/vera-upstream/ ./
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          html = p.read_text(encoding='utf-8')
+          script = '<script src="./advanced-save-export.js" defer></script>'
+          if script not in html:
+              assert '</body>' in html, 'Could not find closing body tag'
+              html = html.replace('</body>', script + '\n</body>')
+          p.write_text(html, encoding='utf-8')
+          Path('.nojekyll').touch()
+          PY
+      - name: Commit generated app
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Build integrated VERA with advanced save/export [skip ci]"
+            git push
+          fi
