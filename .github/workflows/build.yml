@@ -29,6 +29,12 @@ jobs:
               assert '</body>' in html, 'Could not find closing body tag'
               html = html.replace('</body>', script + '\n</body>')
           p.write_text(html, encoding='utf-8')
+          sw = Path('sw.js')
+          if sw.exists():
+              js = sw.read_text(encoding='utf-8')
+              js = js.replace("'./', './index.html'", "'./', './index.html', './advanced-save-export.js'")
+              js = js.replace("const CACHE_NAME = 'vproj-20261102-v2-1-core'", "const CACHE_NAME = 'vproj-advanced-save-v1'")
+              sw.write_text(js, encoding='utf-8')
           Path('.nojekyll').touch()
           PY
       - name: Commit generated app
